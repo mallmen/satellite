@@ -1,0 +1,23 @@
+- name: Install Satellite
+  hosts: satellite
+  gather_facts: yes
+
+  vars:
+    satellite_installer_scenario: satellite
+    satellite_installer_package: satellite-installer
+    satellite_installer_options:
+      - ' --foreman-proxy-dhcp true'
+      - ' --foreman-proxy-dhcp-managed true'
+      - ' --foreman-proxy-dhcp-interface ens224'
+      - ' --foreman-proxy-dhcp-range "10.0.1.1 10.0.1.254"'
+      - ' --foreman-proxy-dhcp-gateway 10.0.0.1'
+      - ' --foreman-proxy-dhcp-nameservers 192.168.68.11'
+      - ' --foreman-proxy-dhcp-server 10.0.0.13'
+      - ' --foreman-proxy-tftp true'
+      - ' --foreman-proxy-tftp-managed true'
+      - ' --foreman-proxy-tftp-servername 10.0.0.13'
+      
+  tasks:
+    - name: Configure Satellite for provisioning
+      ansible.builtin.import_role:
+        name: redhat.satellite_operations.installer 

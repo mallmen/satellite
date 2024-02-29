@@ -1,0 +1,37 @@
+- name: Install Satellite
+  hosts: satellite
+  gather_facts: yes
+
+  vars:
+    sat_cert_directory: /root/satellite_cert
+    ca_cert: rootCA.pem
+    server_cert: satellite.local.lab.pem
+    server_key: satellite.local.lab.key 
+    satellite_installer_scenario: satellite
+    satellite_installer_package: satellite-installer
+    satellite_installer_options:
+      - "--certs-server-cert {{ sat_cert_directory }}/{{ server_cert }}"
+      - "--certs-server-key {{ sat_cert_directory }}/{{ server_key }}"
+      - "--certs-server-ca-cert {{ sat_cert_directory }}/{{ ca_cert }}" 
+      - "--certs-update-server"
+      - "--certs-update-server-ca"
+
+  tasks:
+    - name: Create certificate directory on Satellite
+      file:
+        path: "{{ sat_cert_directory }}"
+        mode: 0600
+        state: directory
+
+    - name: Copy certificate files to Satellite
+      copy:
+        src: "files/{{ item }}"
+        dest: "{{ sat_cert_directory }}/{{ item }}"
+      loop: 
+        - "{{ ca_cert }}"
+        - "{{ server_cert }}"
+        - "{{ server_key }}"
+
+    - name: Install Satellite certificates
+      ansible.builtin.import_role:
+        name: redhat.satellite_operations.installer 

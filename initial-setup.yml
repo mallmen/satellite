@@ -1,0 +1,69 @@
+- name: Initial setup
+  hosts: satellite
+  gather_facts: no
+
+  vars:
+    storage_pools:
+      - name: satellite
+        disks:
+          - sdb
+        volumes:
+          - name: pgsql
+            size: 20G
+            mount_point: /var/lib/pgsql
+            state: present
+          - name: pulp
+            size: 300G
+            mount_point: /var/lib/pulp
+            state: present
+          - name: qpidd
+            size: 5G
+            mount_point: /var/lib/qpidd
+            state: present
+    firewall:
+      - service: RH-Satellite-6
+        state: enabled
+        runtime: yes
+        permanent: yes
+    rhc_repositories:
+      - {name: "*", state: disabled}
+      - {name: rhel-8-for-x86_64-baseos-rpms, state: enabled}
+      - {name: rhel-8-for-x86_64-appstream-rpms, state: enabled}
+      - {name: satellite-6.14-for-rhel-8-x86_64-rpms, state: enabled}
+      - {name: satellite-maintenance-6.14-for-rhel-8-x86_64-rpms, state: enabled}
+
+  tasks:
+    - name: Configure Satellite filesystems
+      ansible.builtin.import_role:
+        name: redhat.rhel_system_roles.storage
+
+    - name: Configure Satellite firewalls
+      ansible.builtin.import_role:
+        name: redhat.rhel_system_roles.firewall
+
+    - name: Configure repositories
+      ansible.builtin.import_role:
+        name: redhat.rhel_system_roles.rhc
+
+    - name: Update all packages
+      ansible.builtin.dnf:
+        name: '*'
+        state: latest
+
+    - name: Ensure yum-utils is installed
+      ansible.builtin.dnf:
+        name: yum-utils
+        state: present
+
+    - name: Check if reboot required
+      ansible.builtin.command: /usr/bin/needs-restarting -r
+      register: needs_restart
+      failed_when: needs_restart.rc > 1
+
+    - name: Debug reboot required
+      ansible.builtin.debug:
+        var: needs_restart
+
+    - name: Reboot if necessary
+      when: needs_restart.rc == 1
+      ansible.builtin.reboot:

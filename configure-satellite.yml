@@ -1,0 +1,260 @@
+- name: Perfom day-2 configuration of Satellite
+  hosts: satellite
+  gather_facts: yes
+
+  vars_files:
+    - vars/satellite.yml
+
+  tasks:
+    - name: Configure Satellite manifest
+      ansible.builtin.import_role:
+        name: redhat.satellite.manifest
+
+    - name: Configure Red Hat repositories
+      ansible.builtin.import_role:
+        name: redhat.satellite.repositories
+
+    - name: Configure Red Hat repositories sync plan
+      redhat.satellite.sync_plan:
+        username: "{{ satellite_username }}"
+        password: "{{ satellite_password }}"
+        server_url: "{{ satellite_server_url }}"
+        name: "RHEL Sync"
+        organization: "{{ satellite_organization }}"
+        interval: daily
+        enabled: yes
+        sync_date: "2023-11-10 07:00:00 UTC"
+        products: "{{ satellite_products | selectattr('name') | map(attribute='name') }}"
+
+    - name: Configure authentication source
+      redhat.satellite.auth_source_ldap:
+        name: LOCAL.LAB
+        host: idm.local.lab
+        port: 636
+        tls: yes
+        account: "{{ satellite_idm_account }}"
+        account_password: "{{ satellite_idm_account_password }}"
+        base_dn: dc=local,dc=lab
+        groups_base: cn=groups,cn=accounts,dc=local,dc=lab
+        server_type: free_ipa
+        attr_login: uid
+        attr_firstname: givenName
+        attr_lastname: sn
+        attr_mail: mail
+        server_url: "{{ satellite_server_url }}"
+        username: "{{ satellite_username }}"
+        password: "{{ satellite_password }}"
+        state: present
+
+    - name: Configure admin user
+      redhat.satellite.user:
+         auth_source: LOCAL.LAB
+         admin: yes
+         default_organization: Lab
+         default_location: Gilbert
+         firstname: Mike
+         lastname: Allmen
+         login: mallmen
+         mail: mallmen@redhat.com
+         server_url: "{{ satellite_server_url }}"
+         username: "{{ satellite_username }}"
+         password: "{{ satellite_password }}"
+         state: present
+
+    - name: Configure IDM for provisioned hosts
+      block:
+        - name: Configure keytab for foreman-proxy user
+          ansible.builtin.copy:
+            src: /root/freeipa.keytab
+            dest: /etc/foreman-proxy/freeipa.keytab
+            remote_src: yes
+            owner: foreman-proxy
+            group: foreman-proxy
+
+        - name: Retrieve IDM CA certificate
+          ansible.builtin.get_url:
+            url: http://idm.local.lab/ipa/config/ca.crt
+            dest: /etc/pki/ca-trust/source/anchors/ca.crt
+
+        - name: Add CA certificate to CA trust
+          ansible.builtin.command: update-ca-trust enable
+
+        - name: Add CA certificate to CA trust
+          ansible.builtin.command: update-ca-trust
+
+        #- name: Install Satellite
+        #  ansible.builtin.import_role:
+        #    name: redhat.satellite_operations.installer
+        #  vars:
+        #    satellite_installer_scenario: satellite
+        #    satellite_installer_package: satellite-installer
+        #    satellite_installer_options:
+        #      - '--foreman-proxy-realm true'
+        #      - '--foreman-proxy-realm-keytab /et/foreman-proxy/freeipa.keytab'
+        #      - '--foreman-proxy-realm-principal realm-capsule@LOCAL.LAB'
+        #      - '--foreman-proxy-realm-provider freeipa'
+
+        - name: Restart foreman-proxy
+          ansible.builtin.service:
+            name: foreman-proxy
+            state: restarted
+
+        - name: Create IDM realm
+          redhat.satellite.realm:
+            server_url: "{{ satellite_server_url }}"
+            username: "{{ satellite_username }}"
+            password: "{{ satellite_password }}"
+            name: LOCAL.LAB
+            realm_proxy: satellite.local.lab
+            realm_type: Red Hat Identity Management
+            state: present
+
+    - name: Create vmware compute resource
+      redhat.satellite.compute_resource:
+        name: vmware
+        provider: vmware
+        provider_params:
+          caching_enabled: false
+          url: newcastle.local.lab
+          user: "{{ vmware_username }}"
+          password: "{{ vmware_password }}"
+          datacenter: homelab
+        server_url: "{{ satellite_server_url }}"
+        username: "{{ satellite_username }}"
+        password: "{{ satellite_password }}"
+        state: present
+
+    - name: Configure libvirt compute resource
+      block:
+        - name: Create .ssh directory for foreman user
+          ansible.builtin.file:
+            path: /usr/share/foreman/.ssh
+            owner: foreman
+            group: foreman
+            mode: 0700
+            state: directory
+
+        - name: Create ssh-key pair
+          community.crypto.openssh_keypair:
+            path: /usr/share/foreman/.ssh/id_rsa
+            comment: foreman@satellite.local.lab
+            owner: foreman
+            group: foreman
+
+        - name: Get pub file
+          ansible.builtin.fetch:
+            src: /usr/share/foreman/.ssh/id_rsa.pub
+            dest: files/id_rsa.pub
+            flat: yes
+
+        - name: copy key
+          delegate_to: arsenal.local.lab
+          ansible.posix.authorized_key:
+            user: root
+            state: present
+            key: "{{ lookup('file', 'files/id_rsa.pub') }}"
+
+        - name: Remove key
+          ansible.builtin.file:
+            path: "{{ playbook_dir }}/files/id_rsa.pub"
+            state: absent
+
+        - name: Create libvirt compute resource
+          redhat.satellite.compute_resource:
+            name: libvirt-arsenal
+            provider: libvirt
+            provider_params:
+              url: qemu+ssh://root@arsenal.local.lab/system
+              display_type: spice
+            server_url: "{{ satellite_server_url }}"
+            username: "{{ satellite_username }}"
+            password: "{{ satellite_password }}"
+            state: present
+
+    - name: Configure lifecycle environment
+      tags:
+        - lifecycle
+      redhat.satellite.lifecycle_environment:
+        server_url: "{{ satellite_server_url }}"
+        username: "{{ satellite_username }}"
+        password: "{{ satellite_password }}"
+        name: "{{ item.name }}"
+        label: "{{ item.name }}"
+        prior: "{{ item.previous }}"
+        organization: Lab
+        state: present
+      loop: "{{ lifecycle_envs }}"
+      vars:
+        lifecycle_envs:
+          - name: dev
+            previous: Library
+          - name: test
+            previous: dev
+          - name: prod
+            previous: test
+
+    - name: Configure primary subnet
+      tags:
+        - subnet
+      redhat.satellite.subnet:
+        server_url: "{{ satellite_server_url }}"
+        username: "{{ satellite_username }}"
+        password: "{{ satellite_password }}"
+        name: 10.0.0.0
+        network: 10.0.0.0
+        cidr: 23
+        gateway: 10.0.0.1
+        from_ip: 10.0.1.1
+        to_ip: 10.0.1.254
+        boot_mode: DHCP
+        dhcp_proxy: satellite.local.lab
+        tftp_proxy: satellite.local.lab
+        domains:
+          - local.lab
+        organizations:
+          - Lab
+        locations:
+          - Gilbert
+        state: present
+
+    - name: Create activation keys
+      tags:
+        - keys
+      redhat.satellite.activation_key:
+        server_url: "{{ satellite_server_url }}"
+        username: "{{ satellite_username }}"
+        password: "{{ satellite_password }}"
+        name: "{{ item.name }}"
+        organization: Lab
+        lifecycle_environment: "{{ item.le | default('Library') }}"
+        content_view: "{{ item.cv | default('Default Organization View') }}"
+        release_version: "{{ item.release | default(omit) }}"
+        service_level: "{{ item.level | default(omit) }}"
+        state: present
+      loop: "{{ activation_keys }}"
+      vars:
+        activation_keys:
+          - name: rhel7-dev
+            le: dev
+            cv: rhel7-dev
+          #- name: rhel8-dev
+          #le: dev
+          #- name: rhel9-dev
+          #le: dev
+
+    - name: Configure settings
+      tags:
+        - settings
+      redhat.satellite.setting:
+        server_url: "{{ satellite_server_url }}"
+        username: "{{ satellite_username }}"
+        password: "{{ satellite_password }}"
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+      loop: "{{ settings }}"
+      vars:
+        settings:
+          - name: show_unsupported_templates
+            value: false
+          - name: destroy_vm_on_host_delete
+            value: true

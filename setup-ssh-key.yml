@@ -1,0 +1,11 @@
+- name: Initial setup of SSH key for Satellite host
+  hosts: satellite
+
+  vars:
+    ssh_key: /home/mallmen/.ssh/id_satellite_rsa.pub
+  tasks:
+    - name: Setup SSH keys
+      ansible.posix.authorized_key:
+        user: root
+        state: present
+        key: "{{ lookup('file', ssh_key) }}"

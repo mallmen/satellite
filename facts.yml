@@ -1,0 +1,39 @@
+- hosts: satellite
+  gather_facts: no
+
+  vars:
+    storage_pools:
+      - name: satellite
+        disks:
+          - sdb
+        volumes:
+          - name: pgsql
+            size: 20G
+            mount_point: /var/lib/pgsql
+            state: present
+          - name: pulp
+            size: 300G
+            mount_point: /var/lib/pulp
+            state: present
+          - name: qpidd
+            size: 5G
+            mount_point: /var/lib/qpidd
+            state: present
+
+  tasks:
+    - ansible.builtin.setup:
+        filter: ansible_lvm
+      register: lvm
+
+    - ansible.builtin.set_fact:
+        logical_volumes: "{{ lvm.ansible_facts.ansible_lvm.lvs }}"
+
+    - ansible.builtin.debug:
+        var: logical_volumes
+      when: '"pgsqll" in logical_volumes'
+
+    - ansible.builtin.debug:
+         msg: 
+           - "{{ storage_pools[0].volumes[0].name }}"
+           - "{{ storage_pools[0].volumes[1].name }}"
+           - "{{ storage_pools[0].volumes[2].name }}"

@@ -1,0 +1,11 @@
+- name: Copy foreman key to libvirt host
+  hosts: arsenal
+
+  tasks:
+    - name: copy key
+      become: yes
+      ansible.posix.authorized_key:
+        user: root
+        state: present
+        key: "{{ lookup('file', 'files/id_rsa.pub') }}"
+

@@ -1,0 +1,24 @@
+- name: Install Satellite
+  hosts: satellite
+  gather_facts: yes
+
+  vars:
+    satellite_installer_scenario: satellite
+    satellite_installer_package: satellite-installer
+    satellite_installer_options:
+      - '--foreman-initial-organization "Lab"'
+      - '--foreman-initial-location "Gilbert"'
+      - '--foreman-initial-admin-password password'
+
+  tasks:
+    - name: Enable Satellite module
+      ansible.builtin.command: dnf module enable satellite:el8 -y
+
+    - name: Install Satellite rpm
+      ansible.builtin.dnf:
+        name: satellite
+        state: present
+
+    - name: Install Satellite
+      ansible.builtin.import_role:
+        name: redhat.satellite_operations.installer 

@@ -1,0 +1,38 @@
+- name: Perfom day-2 configuration of Satellite
+  hosts: satellite
+  gather_facts: yes
+
+  tasks:
+    - name: Configure libvirt compute resource
+      block:
+        - name: Create .ssh directory for foreman user
+          ansible.builtin.file:
+            path: /usr/share/foreman/.ssh
+            owner: foreman
+            group: foreman
+            mode: 0600
+            state: directory
+
+        - name: Create ssh-key pair
+          community.crypto.openssh_keypair:
+            path: /usr/share/foreman/.ssh/id_rsa
+            owner: foreman
+            group: foreman
+
+        - name: Get pub file
+          ansible.builtin.fetch:
+            src: /usr/share/foreman/.ssh/id_rsa.pub
+            dest: files/id_rsa.pub
+            flat: yes
+
+        - name: copy key
+          delegate_to: arsenal.local.lab
+          ansible.posix.authorized_key:
+            user: root
+            state: present
+            key: "{{ lookup('file', 'files/id_rsa.pub') }}"
+
+        - name: Remove key
+          ansible.builtin.file:
+            path: files/id_rsa.pub
+            state: absent
